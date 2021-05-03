@@ -6,6 +6,10 @@ The Shiny apps can be found at:
 https://iob-genetic.shinyapps.io/mutscore/
 https://iob-genetic.shinyapps.io/mutscore-batch/
 
+## Important note
+
+The scripts used from ANNOVAR and the variants from HGMD database are not present in this repository due to protection of the data by licences.
+
 ## Prerequisites
 + BCFTools [[Link](https://samtools.github.io/bcftools/howtos/install.html)] (>= v1.9)
 + BEDTools [[Link](https://bedtools.readthedocs.io/en/latest/content/installation.html)] (>= v2.25.0)
