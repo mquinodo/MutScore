@@ -19,7 +19,7 @@ The scripts do not require compilation.
 ## Scripts
 
 + 00_databases-preprocessing.sh
--> Download and processing of databases (ClinVar, ANNOVAR, dbNSFP4.0, CONDEL, ClinPred, OMIM, gnomAD and pext scores).
+++ Download and processing of databases (ClinVar, ANNOVAR, dbNSFP4.0, CONDEL, ClinPred, OMIM, gnomAD and pext scores).
 
 + 01_clinvar_v0.8-all.sh
 -> Bla
