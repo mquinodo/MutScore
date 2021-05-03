@@ -23,12 +23,32 @@ The scripts do not require compilation.
    -> Download and processing of databases (ClinVar, ANNOVAR, dbNSFP4.0, CONDEL, ClinPred, OMIM, gnomAD and pext scores).
 
 + 01_clinvar_v0.8-all.sh
--> Bla
+
+   -> Annotation of ClinVar, dbNSFP4.0 and gnomAD variants and parsing of the files.
 
 + 02_mutscore-computation-plots.R
+
+   -> Processing of the annotated variants: computation of the amino-acid change and positional scores.
+   -> Computation of MutScore model and scores.
+   -> Analysis and figures used in the manuscript.
+   
 + 03_cross-validation.R
+
+   -> Cross-validation on the training set with figure used in the manuscript.
+   
 + 04_MutScore-annotation.sh
+
+   -> Annotation of all possible missense with MutScore.
+   
 + 05_LiftOver.sh
+
+   -> Conversion of scores in hg19 to hg38.
+   
 + 06_data-for-mutland.R
+
+   -> Processing of the data for MutLand plots.
+   
 + 07_Shiny_preprocesssing.R
 
+   -> Preprocessing of data for the two Shiny apps.
+   
