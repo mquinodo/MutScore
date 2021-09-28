@@ -423,67 +423,524 @@ regionsb=allregions2[which(as.numeric(allregions2[,9])>=10),]
 colnames(resi1)=c("isoform","gene","%PLPin","%genein","score","OR","p-value","cor-p")
 colnames(resi2)=c("isoform","gene","%PLPin","%genein","score","OR","p-value","cor-p")
 
-write.table(resi1,file=paste(here,dataLoc,"regionsPLP.tsv",quote=F,sep="\t",row.names=F)
-write.table(resi2,file=paste(here,dataLoc,"regionsBLB.tsv",quote=F,sep="\t",row.names=F)
+write.table(resi1,file=paste(here,dataLoc,"regionsPLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(resi2,file=paste(here,dataLoc,"regionsBLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
 
 save(regionsb,regionsp,allregions1,allregions2,resi1,resi2, file = paste(here,dataLoc,"regions.RData",sep=""))
 save(regionsb,regionsp,allregions1,allregions2,resi1,resi2, file = paste(here,"Shiny/regions.RData",sep=""))
 
-# Lelieveld
 
-load(file = paste(here,dataLoc,"data6-forregions.RData",sep=""))
+
+####### positional score for permutation test p-values
+
+train[,6]=as.character(train[,6])
+train[,1]=as.factor(as.character(train[,1]))
+passenger[,6]=as.character(passenger[,6])
+passenger[,1]=as.factor(as.character(passenger[,1]))
+
+PLPgene=unique(train[which(train[,1]=="PLP"),6])
+passenger2=passenger[which(is.element(passenger[,6],PLPgene)==T),]
+rm(passenger)
+
+# selecting only transcripts with more than 10 PLPs and one BLB
+PLP=table(train[which(train[,1]=="PLP"),2])
+s1=names(PLP[which(as.numeric(PLP)>=10)])
+BLB=table(train[which(train[,1]=="BLB"),2])
+s2=names(BLB[which(as.numeric(BLB)>=0)])
+s3=intersect(s1,s2)
+
+train=train[which(is.element(train[,2],s3)==T),]
+passenger2=passenger2[which(is.element(passenger2[,2],s3)==T),]
+
+passenger2[,16:55]=0
+
+save(train,passenger2, file = paste(here,dataLoc,"data5-review2.RData",sep=""))
+
+###
+
+load(file = paste(here,dataLoc,"data5-review2.RData",sep=""))
+
+# 71 = nb of PLP for isoform; 70 = positional score; 72 = "LOW" if less than 10 PLPs or less than 1 BLB
+train[,70]=0
+train[,71]=0
+train[,72]=0
+passenger2[,70]=0
+passenger2[,71]=0
+passenger2[,72]=0
+
+trainALL=train
+passALL=passenger2
+
+genelist=unique(c(as.character(trainALL[,2]),as.character(passALL[,2]))) # length=2578
+pres1=matrix(nrow=length(genelist),ncol=2)
+pres2=matrix(nrow=length(genelist),ncol=1000)
+pres1[,1]=genelist
+
+for (i in 1:length(genelist)){
+
+	{
+
+		train=trainALL[which(trainALL[,2]==genelist[i]),]
+		passenger2=passALL[which(passALL[,2]==genelist[i]),]
+
+	  print(i)
+	  PLP=which(train[,1]=="PLP")
+	  BLB=which(train[,1]=="BLB")
+	  train[,71]=length(PLP)
+	  print("step1 finished")
+	  rf <- randomForest(
+	    V1 ~ V63,
+	    data=train, ntree = 500, importance = TRUE
+	  )
+	  train[,70]=rf$votes[,2]
+	  pred=predict(rf, newdata=passenger2,"prob")
+	  passenger2[,70]=pred[,2]
+
+	  datareg=unique(passenger2[which(passenger2[,1]=="dbNFSP4.0"),c(2,63,70,8,9)]) 
+
+	  limh=0.05
+	  allregions=c()
+	  # taking all changes for one isoform with: prot-pos / pos-score / chr / begin
+	  gene=datareg[,c(2,3,4,5)]
+	  train2=train
+	  gene=gene[sort(gene[,1],index.return=T)$ix,] # sort by aa pos
+	  if (dim(gene)[1]>0){
+		  regions=c()
+		  inside=F
+		  count=0
+		  for (k in 1:dim(gene)[1]){
+		    # if not in region and threshold is achivied
+		    if(inside==F & gene[k,2]>=limh){
+		      count=count+1
+		      # begin region with: gene / isoform / prot-pos / prot-pos / chr / begin / begin
+		      regions=rbind(regions,c(as.character(train2[1,6]),genelist[i],gene[k,1],gene[k,1],gene[k,3],gene[k,4],gene[k,4]))
+		      inside=T
+		    }
+		    # if in region but we are leaving it
+		    if(inside==T & gene[k,2]<limh){
+		      # change prot-pos to end and change begin pos to end pos
+		      regions[count,4]=gene[k,1]
+		      regions[count,7]=gene[k,4]
+		      inside=F
+		    }
+		    # if we are inside region but reach the end of the gene
+		    if(inside==T & k==dim(gene)[1]){
+		      regions[count,4]=gene[k,1]
+		      regions[count,7]=gene[k,4]
+		      inside=F
+		    }
+		  }
+		  if(count!=0){
+		    regions=cbind(regions,regions)
+		    for (k in 1:dim(regions)[1]){
+		      # 8=nb-PLP-inside / 9=nb-BLB-inside / 10=perc-PLP-inside / 11=perc-region-size-overGene / 12=nb-tot-PLP-gene / 13=max-prot-pos / 14=region-size(aa)
+		      regions[k,8]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="PLP"))
+		      regions[k,9]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="BLB"))
+		      regions[k,10]=as.numeric(regions[k,8])/length(which(train2[,1]=="PLP"))
+		      regions[k,11]=(as.numeric(regions[k,4])-as.numeric(regions[k,3]))/max(gene[,1])
+		      regions[k,12]=length(which(train2[,1]=="PLP"))
+		      regions[k,13]=max(gene[,1])
+		      regions[k,14]=abs(as.numeric(regions[k,4])-as.numeric(regions[k,3]))
+		    }
+		    allregions=rbind(allregions,regions[,1:14])
+		  }
+		}
+		regionsp=allregions[which(as.numeric(allregions[,8])>=5),]
+
+		#pres1[i,2]=sum(as.numeric(regionsp[,14]))
+		if(length(regionsp)>14){
+			t1=sum(as.numeric(regionsp[,10]))
+			t2=sum(as.numeric(regionsp[,11]))
+			pres1[i,2]=min(t1,1-t2)
+		} else if(length(regionsp)==14){
+			t1=sum(as.numeric(regionsp[10]))
+			t2=sum(as.numeric(regionsp[11]))
+			#pres1[i,2]=min(t1,1-t2)
+			pres1[i,2]=t1+1-t2
+		} else {
+			pres1[i,2]=0
+		}
+
+		trainALL2=train
+		passALL2=passenger2
+
+		if(as.numeric(pres1[i,2])>0){
+			for (m in 1:1000){
+				#print(m)
+
+				train=trainALL2
+				passenger2=passALL2
+
+				maximum=max(passenger2[,63])
+
+				train[which(train[,1]=="PLP"),63]=sample(1:maximum,length(which(train[,1]=="PLP")),replace=T)
+				train[which(train[,1]=="BLB"),63]=sample(1:maximum,length(which(train[,1]=="BLB")),replace=T)
+			  train[,71]=length(PLP)
+
+			  rf <- randomForest(
+			    V1 ~ V63,
+			    data=train, ntree = 500
+			  )
+			  train[,70]=rf$votes[,2]
+			  pred=predict(rf, newdata=passenger2,"prob")
+			  passenger2[,70]=pred[,2]
+				
+			  datareg=unique(passenger2[which(passenger2[,1]=="dbNFSP4.0"),c(2,63,70,8,9)]) 
+
+
+			  limh=0.05
+			  # taking all changes for one isoform with: prot-pos / pos-score / chr / begin
+			  gene=datareg[,c(2,3,4,5)]
+			  train2=train
+			  gene=gene[sort(gene[,1],index.return=T)$ix,] # sort by aa pos
+			  if (dim(gene)[1]>0){
+				  regions=c()
+				  inside=F
+				  count=0
+				  for (k in 1:dim(gene)[1]){
+				    # if not in region and threshold is achivied
+				    if(inside==F & gene[k,2]>=limh){
+				      count=count+1
+				      # begin region with: gene / isoform / prot-pos / prot-pos / chr / begin / begin
+				      regions=rbind(regions,c(as.character(train2[1,6]),genelist[i],gene[k,1],gene[k,1],gene[k,3],gene[k,4],gene[k,4]))
+				      inside=T
+				    }
+				    # if in region but we are leaving it
+				    if(inside==T & gene[k,2]<limh){
+				      # change prot-pos to end and change begin pos to end pos
+				      regions[count,4]=gene[k,1]
+				      regions[count,7]=gene[k,4]
+				      inside=F
+				    }
+				    # if we are inside region but reach the end of the gene
+				    if(inside==T & k==dim(gene)[1]){
+				      regions[count,4]=gene[k,1]
+				      regions[count,7]=gene[k,4]
+				      inside=F
+				    }
+				  }
+				  if(count!=0){
+				    regions=cbind(regions,regions)
+				    for (k in 1:dim(regions)[1]){
+				      # 8=nb-PLP-inside / 9=nb-BLB-inside / 10=perc-PLP-inside / 11=perc-region-size-overGene / 12=nb-tot-PLP-gene / 13=max-prot-pos / 14=region-size(aa)
+				      regions[k,8]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="PLP"))
+				      # regions[k,9]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="BLB"))
+				       regions[k,10]=as.numeric(regions[k,8])/length(which(train2[,1]=="PLP"))
+				       regions[k,11]=(as.numeric(regions[k,4])-as.numeric(regions[k,3]))/max(gene[,1])
+				      # regions[k,12]=length(which(train2[,1]=="PLP"))
+				      # regions[k,13]=max(gene[,1])
+				      regions[k,14]=abs(as.numeric(regions[k,4])-as.numeric(regions[k,3]))
+				    }
+				  }
+				}
+				regionsp=regions[which(as.numeric(regions[,8])>=5),]
+
+
+				# regionsp
+				# 1=gene / 2=isoform / 3=begin-region / 4=end-region / 5=chr / 6=begin-pos / 7=end-pos / 8=nb-PLP / 9=nb-BLB
+				# 10=%-PLP-inside / 11=%-region-gene / 12=nb-PLP-tot / 13=size-gene / 14=size-region
+				#pres1[i,2]=sum(as.numeric(regionsp[,14]))
+				if(length(regionsp)>14){
+					t1=sum(as.numeric(regionsp[,10]))
+					t2=sum(as.numeric(regionsp[,11]))
+					#pres2[i,m]=min(t1,1-t2)
+					pres2[i,m]=t1+1-t2
+
+				} else if(length(regionsp)==14){
+					t1=sum(as.numeric(regionsp[10]))
+					t2=sum(as.numeric(regionsp[11]))
+					#pres2[i,m]=min(t1,1-t2)
+					pres2[i,m]=t1+1-t2
+
+				} else {
+					pres2[i,m]=0
+				}
+
+			}
+		}
+
+	}
+
+	save(pres1,pres2,file=paste(here,dataLoc,"data5-scores.RData",sep=""))
+
+}
+
+########
+### BENIGN
+
+load(file = paste(here,dataLoc,"data5-review2.RData",sep=""))
+
+# 71 = nb of PLP for isoform; 70 = positional score; 72 = "LOW" if less than 10 PLPs or less than 1 BLB
+train[,70]=0
+train[,71]=0
+train[,72]=0
+passenger2[,70]=0
+passenger2[,71]=0
+passenger2[,72]=0
+
+trainALL=train
+passALL=passenger2
+
+genelist=unique(c(as.character(trainALL[,2]),as.character(passALL[,2]))) # length=2578
+pres1=matrix(nrow=length(genelist),ncol=2)
+pres2=matrix(nrow=length(genelist),ncol=1000)
+pres1[,1]=genelist
+
+for (i in 1:length(genelist)){
+
+	{
+
+		train=trainALL[which(trainALL[,2]==genelist[i]),]
+		passenger2=passALL[which(passALL[,2]==genelist[i]),]
+
+	  print(i)
+	  PLP=which(train[,1]=="PLP")
+	  BLB=which(train[,1]=="BLB")
+	  train[,71]=length(PLP)
+	  print("step1 finished")
+	  rf <- randomForest(
+	    V1 ~ V63,
+	    data=train, ntree = 500, importance = TRUE
+	  )
+	  train[,70]=rf$votes[,2]
+	  pred=predict(rf, newdata=passenger2,"prob")
+	  passenger2[,70]=pred[,2]
+
+	  datareg=unique(passenger2[which(passenger2[,1]=="dbNFSP4.0"),c(2,63,70,8,9)]) 
+
+	  liml=0.05
+	  allregions=c()
+	  # taking all changes for one isoform with: prot-pos / pos-score / chr / begin
+	  gene=datareg[,c(2,3,4,5)]
+	  train2=train
+	  gene=gene[sort(gene[,1],index.return=T)$ix,] # sort by aa pos
+	  if (dim(gene)[1]>0){
+		  regions=c()
+		  inside=F
+		  count=0
+		  for (k in 1:dim(gene)[1]){
+		    # if not in region and threshold is achivied
+		    if(inside==F & gene[k,2]<=liml){
+		      count=count+1
+		      # begin region with: gene / isoform / prot-pos / prot-pos / chr / begin / begin
+		      regions=rbind(regions,c(as.character(train2[1,6]),genelist[i],gene[k,1],gene[k,1],gene[k,3],gene[k,4],gene[k,4]))
+		      inside=T
+		    }
+		    # if in region but we are leaving it
+		    if(inside==T & gene[k,2]>liml){
+		      # change prot-pos to end and change begin pos to end pos
+		      regions[count,4]=gene[k,1]
+		      regions[count,7]=gene[k,4]
+		      inside=F
+		    }
+		    # if we are inside region but reach the end of the gene
+		    if(inside==T & k==dim(gene)[1]){
+		      regions[count,4]=gene[k,1]
+		      regions[count,7]=gene[k,4]
+		      inside=F
+		    }
+		  }
+		  if(count!=0){
+		    regions=cbind(regions,regions)
+		    for (k in 1:dim(regions)[1]){
+		      # 8=nb-PLP-inside / 9=nb-BLB-inside / 10=perc-PLP-inside / 11=perc-region-size-overGene / 12=nb-tot-PLP-gene / 13=max-prot-pos / 14=region-size(aa)
+		      regions[k,8]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="PLP"))
+		      regions[k,9]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="BLB"))
+		      regions[k,10]=as.numeric(regions[k,9])/length(which(train2[,1]=="BLB"))
+		      regions[k,11]=(as.numeric(regions[k,4])-as.numeric(regions[k,3]))/max(gene[,1])
+		      regions[k,12]=length(which(train2[,1]=="BLB"))
+		      regions[k,13]=max(gene[,1])
+		      regions[k,14]=abs(as.numeric(regions[k,4])-as.numeric(regions[k,3]))
+		    }
+		    allregions=rbind(allregions,regions[,1:14])
+		  }
+		}
+		regionsp=allregions[which(as.numeric(allregions[,9])>=10),]
+
+		if(length(regionsp)>14){
+			t1=sum(as.numeric(regionsp[,10]))
+			t2=sum(as.numeric(regionsp[,11]))
+			pres1[i,2]=min(t1,1-t2)
+		} else if(length(regionsp)==14){
+			t1=sum(as.numeric(regionsp[10]))
+			t2=sum(as.numeric(regionsp[11]))
+			pres1[i,2]=min(t1,1-t2)
+
+		} else {
+			pres1[i,2]=0
+		}
+
+		trainALL2=train
+		passALL2=passenger2
+
+		if(as.numeric(pres1[i,2])>0){
+			for (m in 1:1000){
+				#print(m)
+
+				train=trainALL2
+				passenger2=passALL2
+
+				maximum=max(passenger2[,63])
+
+				train[which(train[,1]=="PLP"),63]=sample(1:maximum,length(which(train[,1]=="PLP")),replace=T)
+				train[which(train[,1]=="BLB"),63]=sample(1:maximum,length(which(train[,1]=="BLB")),replace=T)
+			  train[,71]=length(PLP)
+
+			  rf <- randomForest(
+			    V1 ~ V63,
+			    data=train, ntree = 500
+			  )
+			  train[,70]=rf$votes[,2]
+			  pred=predict(rf, newdata=passenger2,"prob")
+			  passenger2[,70]=pred[,2]
+				
+			  datareg=unique(passenger2[which(passenger2[,1]=="dbNFSP4.0"),c(2,63,70,8,9)]) 
+					  
+			  liml=0.05
+			  allregions=c()
+			  # taking all changes for one isoform with: prot-pos / pos-score / chr / begin
+			  gene=datareg[,c(2,3,4,5)]
+			  train2=train
+			  gene=gene[sort(gene[,1],index.return=T)$ix,] # sort by aa pos
+			  if (dim(gene)[1]>0){
+				  regions=c()
+				  inside=F
+				  count=0
+				  for (k in 1:dim(gene)[1]){
+				    # if not in region and threshold is achivied
+				    if(inside==F & gene[k,2]<=liml){
+				      count=count+1
+				      # begin region with: gene / isoform / prot-pos / prot-pos / chr / begin / begin
+				      regions=rbind(regions,c(as.character(train2[1,6]),genelist[i],gene[k,1],gene[k,1],gene[k,3],gene[k,4],gene[k,4]))
+				      inside=T
+				    }
+				    # if in region but we are leaving it
+				    if(inside==T & gene[k,2]>liml){
+				      # change prot-pos to end and change begin pos to end pos
+				      regions[count,4]=gene[k,1]
+				      regions[count,7]=gene[k,4]
+				      inside=F
+				    }
+				    # if we are inside region but reach the end of the gene
+				    if(inside==T & k==dim(gene)[1]){
+				      regions[count,4]=gene[k,1]
+				      regions[count,7]=gene[k,4]
+				      inside=F
+				    }
+				  }
+				  if(count!=0){
+				    regions=cbind(regions,regions)
+				    for (k in 1:dim(regions)[1]){
+				      # 8=nb-PLP-inside / 9=nb-BLB-inside / 10=perc-PLP-inside / 11=perc-region-size-overGene / 12=nb-tot-PLP-gene / 13=max-prot-pos / 14=region-size(aa)
+				      regions[k,8]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="PLP"))
+				      regions[k,9]=length(which(train2[,63]>=as.numeric(regions[k,3]) & train2[,63]<=as.numeric(regions[k,4]) & train2[,1]=="BLB"))
+				      regions[k,10]=as.numeric(regions[k,9])/length(which(train2[,1]=="BLB"))
+				      regions[k,11]=(as.numeric(regions[k,4])-as.numeric(regions[k,3]))/max(gene[,1])
+				      regions[k,12]=length(which(train2[,1]=="BLB"))
+				      regions[k,13]=max(gene[,1])
+				      regions[k,14]=abs(as.numeric(regions[k,4])-as.numeric(regions[k,3]))
+				    }
+				    allregions=rbind(allregions,regions[,1:14])
+				  }
+				}
+				regionsp=allregions[which(as.numeric(allregions[,9])>=10),]
+
+
+				# regionsp
+				# 1=gene / 2=isoform / 3=begin-region / 4=end-region / 5=chr / 6=begin-pos / 7=end-pos / 8=nb-PLP / 9=nb-BLB
+				# 10=%-PLP-inside / 11=%-region-gene / 12=nb-PLP-tot / 13=size-gene / 14=size-region
+				#pres1[i,2]=sum(as.numeric(regionsp[,14]))
+				if(length(regionsp)>14){
+					t1=sum(as.numeric(regionsp[,10]))
+					t2=sum(as.numeric(regionsp[,11]))
+					pres2[i,m]=min(t1,1-t2)
+				} else if(length(regionsp)==14){
+					t1=sum(as.numeric(regionsp[10]))
+					t2=sum(as.numeric(regionsp[11]))
+					pres2[i,m]=min(t1,1-t2)
+				} else {
+					pres2[i,m]=0
+				}
+
+			}
+		}
+
+	}
+
+	save(pres1,pres2,file=paste(here,dataLoc,"data5-scores-BLB.RData",sep=""))
+
+}
+
+
+load(file=paste(here,dataLoc,"data5-scores.RData",sep=""))
+
+sel=which(is.na(pres1[,2])==F)
+pres1=pres1[sel,]
+pres2=pres2[sel,]
+
+a1=as.numeric(pres1[,2])
+a2=apply(pres2,1,max)
+p=1:length(a1)
+for (i in 1:length(a1)){
+	t=c(a1[i],pres2[i,])
+	p[i]=(1001-rank(t))/1000
+}
+p1=p.adjust(p,method="fdr",n=length(p))
+
 load(file = paste(here,dataLoc,"regions.RData",sep=""))
+resi1[,3]=NA
+for (i in 1:length(p)){
+	resi1[which(resi1[,1]==pres1[i,1]),3]=p[i]
+	resi1[which(resi1[,1]==pres1[i,1]),4]=p1[i]
+}
 
-iso=unique(train[which(train[,1]=="PLP"),2])
-train1=train[which(is.element(train[,2],iso)),c(1,2,63)]
-data=datareg[which(is.element(datareg[,1],iso)),c(1,2)]
+newPLP=resi1[,c(3,4)]
 
-save(iso,train1,data,file=paste(here,dataLoc,"Lelieveld.RData",sep=""))
+########
 
-###############
-##### TO REMOVE
-###############
 
-# load(file=paste(here,dataLoc,"Lelieveld.RData",sep=""))
+load(file=paste(here,dataLoc,"data5-scores-BLB.RData",sep=""))
 
-# res=c()
+sel=which(is.na(pres1[,2])==F)
+pres1=pres1[sel,]
+pres2=pres2[sel,]
 
-# for (i in 1:length(iso)){
-#   maxi=max(data[which(data[,1]==iso[i]),2])
-#   posi=train1[which(train1[,2]==iso[i] & train1[,1]=="PLP"),3]
-#   if(length(posi)>9){
-#     print(i)
-#     prod=0
-#     for (j in 1:length(posi)){
-#       for(k in 1:length(posi)){
-#         if(j<k){
-#           prod=prod+log10((abs(posi[j]-posi[k])+1)/(maxi+1))
-#         }
-#       }
-#     }
-#     prod1=10^(-1*(-1*prod)^(1/length(posi)))
+a1=as.numeric(pres1[,2])
+a2=apply(pres2,1,max)
+p=1:length(a1)
+for (i in 1:length(a1)){
+	t=c(a1[i],pres2[i,])
+	p[i]=(1001-rank(t))/1000
+}
+p1=p.adjust(p,method="fdr",n=length(p))
 
-#     sim=c()
-#     for (m in 1:100000){
-#       prod=0
-#       pos=sample(1:maxi,length(posi), replace=T)
-#       for (j in 1:length(pos)){
-#         for(k in 1:length(pos)){
-#           if(j<k){
-#             prod=prod+log10((abs(pos[j]-pos[k])+1)/(maxi+1))
-#           }
-#         }
-#       }
-#       prod=10^(-1*(-1*prod)^(1/length(pos)))
-#       sim=c(sim,prod)
-#     }
 
-#     pval=(length(which(sim<prod1))+1)/(100000+1)
-#     res=rbind(res,c(iso[i],train[which(train[,2]==iso[i])[1],6],pval))
-#     print(c(iso[i],train[which(train[,2]==iso[i])[1],6],pval))
+load(file = paste(here,dataLoc,"regions.RData",sep=""))
+resi2[,3]=NA
+for (i in 1:length(p)){
+	resi2[which(resi2[,1]==pres1[i,1]),3]=p[i]
+	resi2[which(resi2[,1]==pres1[i,1]),4]=p1[i]
+}
 
-#   }
-# }
+newBLB=resi2[,c(3,4)]
+
+save(newPLP,newBLB,file=paste(here,dataLoc,"regions-correction.RData",sep=""))
+
+
+# review correction
+
+load(file = paste(here,dataLoc,"regions.RData",sep=""))
+load(file = paste(here,dataLoc,"regions-correction.RData",sep=""))
+
+resi1[,c(7,8)]=newPLP
+resi2[,c(7,8)]=newBLB
+
+save(regionsb,regionsp,allregions1,allregions2,resi1,resi2, file = paste(here,dataLoc,"regions-review.RData",sep=""))
+save(regionsb,regionsp,allregions1,allregions2,resi1,resi2, file = paste(here,"Shiny/regions-review.RData",sep=""))
+
+write.table(resi1,file=paste(here,dataLoc,"regionsPLP-review.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(resi2,file=paste(here,dataLoc,"regionsBLB-review.tsv",sep=""),quote=F,sep="\t",row.names=F)
+
 
 ########################################
 
@@ -787,6 +1244,37 @@ auc(rf.roc)
 write.matrix(rf$importance,file=paste(here,dataLoc,"importance.txt",sep=""))
 save(rf, file = paste(here,dataLoc,"rf.RData",sep=""))
 
+# compute RandomForest for MutScore with REVEL
+
+rf <- randomForest(
+  ClinVar ~ V20 + V24 + V21 + V28 + V48 + V49 + V50 + V51 + V52 + V53 + V54 + V55 + V17 + V18 + V58 + V59 + V69 + V70 + V33,
+  data=train, ntree = 1000, importance = TRUE
+)
+rf.roc<-roc(train$ClinVar,rf$votes[,2])
+auc(rf.roc)
+
+write.matrix(rf$importance,file=paste(here,dataLoc,"importance-REVEL.txt",sep=""))
+save(rf, file = paste(here,dataLoc,"rf-revel.RData",sep=""))
+train[,74]=rf$votes[,2]
+
+auc(roc(train[,1],train[,74]))
+
+
+rf <- randomForest(
+  ClinVar ~ V20 + V24 + V21 + V28 + V48 + V49 + V50 + V51 + V52 + V53 + V54 + V55 + V17 + V18 + V58 + V59 + V69 + V70 + V29,
+  data=train, ntree = 1000, importance = TRUE
+)
+rf.roc<-roc(train$ClinVar,rf$votes[,2])
+auc(rf.roc)
+
+write.matrix(rf$importance,file=paste(here,dataLoc,"importance-VEST4.txt",sep=""))
+save(rf, file = paste(here,dataLoc,"rf-VEST4.RData",sep=""))
+train[,74]=rf$votes[,2]
+
+auc(roc(train[,1],train[,74]))
+
+
+
 #######################
 
 # computing MutScore for all missense (column 74)
@@ -888,15 +1376,25 @@ plotROC <- function(data,name,title) {
 	par(mai=c(1,1,1,1))
 	plot(1,1,xaxs="i",yaxs="i",col=0,xlim=c(1.02,-0.02),ylim=c(-0.02,1.02),xlab="Specificity",ylab="Sensitivity",main=paste(title," missense variants in ",nbgene," genes",sep=""),asp=1,cex.main=2,cex.lab=1.8,cex.axis=1.5)
 	lines(roc(data[,1],data[,74]),col=1,xaxs="i",yaxs="i",lty=1,lwd=1.5)
+	roc1=roc(data[,1],data[,74])
 	text(0.2,0.9,"ROC curve for top 8",cex=1.5,font=2)
 	names=c("ClinPred","ADA","RF","CONDEL","SIFT","SIFT4G","PolyPhen-HDIV","PolyPhen-HVAR","LRT","MutationTaster",
 	      "MutationAssessor","FATHMM","PROVEAN","VEST4","metaSVM","metaLR","M-CAP","REVEL","MutPred","MVP","MPC","PrimateAI","DEOGEN2","CADD","DANN","fathmm-MKL",
 	      "fathmm-XF","eigen","eigen-PC","GenoCanyon","fitCons","GERP++NR","GERP++RS","PhyloP100way","PhyloP30way","PhyloP17way","phastCons100way","phastCons30way","phastCons17way","SiPhy29way")
 	nb=c(16:55)
-	res=cbind(names,names,names)
+	res=cbind(names,names,names,names)
 	res[,2]=nb
 	for (i in 1:dim(res)[1]){
+		print(i)
 		res[i,3]=round(auc(roc(data$ClinVar,data[,as.numeric(res[i,2])])),digits=3)
+		if(is.element(i,c(5,6,9,12,13))){
+			roc2=roc(data$ClinVar,(-1)*data[,as.numeric(res[i,2])])
+			res[i,4]=roc.test(roc1, roc2)$p.value
+		}
+		else{
+			roc2=roc(data$ClinVar,data[,as.numeric(res[i,2])])
+			res[i,4]=roc.test(roc1, roc2)$p.value
+		}
 	}
 	res1=res
 	res2=res[sort(as.numeric(res[,3]),index.return=T,decreasing=T)$ix,]
@@ -924,8 +1422,69 @@ plotROC <- function(data,name,title) {
 	text(x = xx, y = label-0.002, label = label, pos = 3, cex = 0.5)
 	box()
 	dev.off()
-	write.table(res1[,c(1,3)],file=paste(here,dataLoc,"AUC-",name,".tsv",sep=""),quote=F,sep="\t")
+	write.table(res1[,c(1,3,4)],file=paste(here,dataLoc,"AUC-delong-",name,".tsv",sep=""),quote=F,sep="\t")
+	print(roc(data[,1],data[,74]))
 }
+
+plotROC2 <- function(data,name,title) {
+
+	pdf(file = paste(here,plot,"",name,".pdf",sep=""),width=10,height=10)
+
+	nbgene=length(unique(data[,6]))
+	par(mfrow=c(1,1))
+	par(mai=c(1,1,1,1))
+	plot(1,1,xaxs="i",yaxs="i",col=0,xlim=c(1.02,-0.02),ylim=c(-0.02,1.02),xlab="Specificity",ylab="Sensitivity",main=paste(title," missense variants in ",nbgene," genes",sep=""),asp=1,cex.main=2,cex.lab=1.8,cex.axis=1.5)
+	lines(roc(data[,1],data[,74]),col=1,xaxs="i",yaxs="i",lty=1,lwd=1.5)
+	roc1=roc(data[,1],data[,74])
+	text(0.2,0.9,"ROC curve for top 8",cex=1.5,font=2)
+	names=c("ClinPred","ADA","RF","CONDEL","SIFT","SIFT4G","PolyPhen-HDIV","PolyPhen-HVAR","LRT","MutationTaster",
+	      "MutationAssessor","FATHMM","PROVEAN","VEST4","metaSVM","metaLR","M-CAP","REVEL","MutPred","MVP","MPC","PrimateAI","DEOGEN2","CADD","DANN","fathmm-MKL",
+	      "fathmm-XF","eigen","eigen-PC","GenoCanyon","fitCons","GERP++NR","GERP++RS","PhyloP100way","PhyloP30way","PhyloP17way","phastCons100way","phastCons30way","phastCons17way","SiPhy29way")
+	nb=c(16:55)
+	res=cbind(names,names,names,names)
+	res[,2]=nb
+	for (i in 1:dim(res)[1]){
+		print(i)
+		res[i,3]=round(auc(roc(data$ClinVar,data[,as.numeric(res[i,2])])),digits=3)
+		if(is.element(i,c(5,6,9,12,13))){
+			roc2=roc(data$ClinVar,(-1)*data[,as.numeric(res[i,2])])
+			res[i,4]=roc.test(roc1, roc2)$p.value
+		}
+		else{
+			roc2=roc(data$ClinVar,data[,as.numeric(res[i,2])])
+			res[i,4]=roc.test(roc1, roc2)$p.value
+		}
+	}
+	res1=res
+	res2=res[sort(as.numeric(res[,3]),index.return=T,decreasing=T)$ix,]
+	res2=res2[-which(res2[,2]==88 | res2[,2]==16),]
+
+	n=7
+	colo=c("darkgoldenrod","#FF0018","#FFA52C","#FFFF41","chartreuse3","blue","purple")
+	for (k in 1:n){
+		i=as.numeric(res2[k,2])
+		lines(roc(data$ClinVar,data[,i]),col=colo[k],lty=1,lwd=1.5)
+		#text(0.5,0.35-k*0.035,paste("AUC ",res2[k,1]," = ",round(auc(roc(data$ClinVar,data[,i])),digits=3),sep=""))
+	}
+	legend(0.35,0.87,legend=c("MutScore",res2[1:n,1]),
+	     col=c(1,colo),lwd=2,lty=1,cex=1.2)
+
+	n=20
+	colo[1:7]=c("darkgoldenrod","#FF0018","#FFA52C","#FFFF41","chartreuse3","blue","purple")
+	colo[8:n]="gray"
+	par(fig = c(0.2,0.98,0.15,0.65), new = T) 
+	xx<-barplot(c(auc(roc(data$ClinVar,data[,74])),as.numeric(res2[1:n,3])),names.arg=c("MutScore",res2[1:n,1]),col=c(1,colo),las=2,ylim=c(0.5,0.8),xpd=F,main="",cex.names=0.95,cex.axis=1.2,panel.first=c(abline(h=(0.8-0.775)/0.225,col='grey'),abline(h=(0.85-0.775)/0.225,col='grey'),abline(h=(0.9-0.775)/0.225,col='grey'),abline(h=(0.95-0.775)/0.225,col='grey')))
+  #grid(nx = NA, ny = NULL, col = "lightgray", lty = "dotted",lwd = par("lwd"), equilogs = TRUE)
+	text(13,0.98,"AUC of top 20 predictors",font=2,adj=0.5,cex=1.5)
+	label=c(auc(roc(data$ClinVar,data[,74])),as.numeric(res2[1:n,3]))
+	label=round(label,digits=3)
+	text(x = xx, y = label-0.002, label = label, pos = 3, cex = 0.5)
+	box()
+	dev.off()
+	write.table(res1[,c(1,3,4)],file=paste(here,dataLoc,"AUC-delong-",name,".tsv",sep=""),quote=F,sep="\t")
+	print(roc(data[,1],data[,74]))
+}
+
 
 
 ### Training all
@@ -1073,9 +1632,48 @@ title="With positional, PLP and all BLB training ClinVar"
 plotROC(data,name,title)
 
 
+### with positional
+
+train2=train[which((train[,1]=="PLP")),]
+train3=train[which(train[,1]=="BLB"),]
+train4=rbind(train2,train3)
+data=train4[which(train4[,71]>=20),]
+
+name="Training-WITH-20PLPs-more"
+title="PLP and all BLB training ClinVar more"
+
+plotROC(data,name,title)
+
+### with positional
+
+train2=train[which((train[,1]=="PLP")),]
+train3=train[which(train[,1]=="BLB"),]
+train4=rbind(train2,train3)
+data=train4[which(train4[,71]<20),]
+
+name="Training-WITH-20PLPs-less"
+title="PLP and all BLB training ClinVar less"
+
+plotROC(data,name,title)
+
+### with positional
+
+train2=train[which((train[,1]=="PLP")),]
+train3=train[which(train[,1]=="BLB"),]
+train4=rbind(train2,train3)
+data=train4[which(train4[,71]<20 & train4[,71]>0),]
+
+name="Training-WITH-10-20PLPs"
+title="PLP and all BLB training ClinVar less"
+
+plotROC(data,name,title)
+
+
+
+
 ############ Figure 3 and SX ####
 
-load(file = paste(here,dataLoc,"regions.RData",sep=""))
+load(file = paste(here,dataLoc,"regions-review.RData",sep=""))
 
 ##### plot for PLP regions
 
@@ -1084,10 +1682,10 @@ load(file = paste(here,dataLoc,"regions.RData",sep=""))
 
 resi=resi1
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05),2])
 a1=unique(train[which(train[,70]>0),6])
 
 a4=setdiff(a4,a5)
@@ -1095,11 +1693,11 @@ a3=setdiff(a3,c(a4,a5))
 a2=setdiff(a2,c(a3,a4,a5))
 a1=setdiff(a1,c(a2,a3,a4,a5))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-PLP-pie.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-PLP-pie-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >5 PLPs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
@@ -1108,7 +1706,7 @@ perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
 pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="PLP clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=0.5)
 dev.off()
 
-pdf(file = paste(here,plot,"clustering-PLP-points.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-PLP-points-review.pdf",sep=""))
 par(pty="s")
 plot(as.numeric(resi[,3]),1-as.numeric(resi[,4]),col="grey",xaxs="i",yaxs="i",pch=16,cex=0.6,ylim=c(-0.02,1.02),asp=1,xlim=c(-0.02,1.02),xlab="Clustering precision",ylab="Clustering density",main="Clustering of PLP variants")
 points(as.numeric(resi[low,3]),1-as.numeric(resi[low,4]),col="red",pch=16,cex=0.6)
@@ -1124,20 +1722,24 @@ dev.off()
 
 ##### plot for PLP regions AD vs AR
 
-load(file = paste(here,dataLoc,"regions.RData",sep=""))
+load(file = paste(here,dataLoc,"regions-review.RData",sep=""))
 
 dom<-read.table(file=paste(here,"00_scripts/databases-processing/gene-dom-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
 rec<-read.table(file=paste(here,"00_scripts/databases-processing/gene-rec-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
+som<-read.table(file=paste(here,"00_scripts/databases-processing/gene-som-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
 
 dom1=which(is.element(resi1[,2],dom))
 rec1=which(is.element(resi1[,2],rec))
+som1=which(is.element(resi1[,2],som))
 
 resi=resi1[dom1,]
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+write.table(unique(resi[,2]),file=paste(here,"00_scripts/databases-processing/gene-dom-used.tsv",sep=""),quote=F,sep="\t")
+
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05),2])
 a1=unique(train[which(train[,70]>0 & is.element(train[,6],dom)),6])
 
 a4=setdiff(a4,a5)
@@ -1145,26 +1747,28 @@ a3=setdiff(a3,c(a4,a5))
 a2=setdiff(a2,c(a3,a4,a5))
 a1=setdiff(a1,c(a2,a3,a4,a5))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-PLP-pie-AD.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-PLP-pie-AD-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >5 PLPs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
 tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
 perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
-pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="PLP clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=1)
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=1)
 dev.off()
 
 
 resi=resi1[rec1,]
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+write.table(unique(resi[,2]),file=paste(here,"00_scripts/databases-processing/gene-rec-used.tsv",sep=""),quote=F,sep="\t")
+
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05),2])
 a1=unique(train[which(train[,70]>0 & is.element(train[,6],rec)),6])
 
 a4=setdiff(a4,a5)
@@ -1172,29 +1776,67 @@ a3=setdiff(a3,c(a4,a5))
 a2=setdiff(a2,c(a3,a4,a5))
 a1=setdiff(a1,c(a2,a3,a4,a5))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-PLP-pie-AR.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-PLP-pie-AR-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >5 PLPs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
 tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
 perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
-pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="PLP clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=1)
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=1)
+dev.off()
+
+resi=resi1[som1,]
+
+write.table(unique(resi[,2]),file=paste(here,"00_scripts/databases-processing/gene-som-used.tsv",sep=""),quote=F,sep="\t")
+
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05),2])
+a1=unique(train[which(train[,70]>0 & is.element(train[,6],som)),6])
+
+a4=setdiff(a4,a5)
+a3=setdiff(a3,c(a4,a5))
+a2=setdiff(a2,c(a3,a4,a5))
+a1=setdiff(a1,c(a2,a3,a4,a5))
+
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
+
+pdf(file = paste(here,plot,"clustering-PLP-pie-SOM-review.pdf",sep=""))
+slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
+lbls <- c("No regions with >5 PLPs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
+a=paste("n = ",slices,sep="")
+tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
+perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","red","red3","red4"), border="white",init.angle=90,cex=1)
 dev.off()
 
 
 # plot cluster BLB 
 
+load(file = paste(here,dataLoc,"regions-review.RData",sep=""))
+
+#load(file = paste(here,dataLoc,"regions.RData",sep=""))
+
 resi=resi2
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05 | is.na(resi[,7])),2])
 a1=unique(train[which(train[,70]>0),6])
+
+length(a1)
+length(a2)
+length(a3)
+length(a4)
+length(a5)
 
 not=setdiff(unique(train[,6]),a1)
 
@@ -1203,20 +1845,20 @@ a3=setdiff(a3,c(a4,a5,not))
 a2=setdiff(a2,c(a3,a4,a5,not))
 a1=setdiff(a1,c(a2,a3,a4,a5,not))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-BLB-pie.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-BLB-pie-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >10 BLBs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
 tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
 perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
-pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="BLB clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
 dev.off()
 
-pdf(file = paste(here,plot,"clustering-BLB-points.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-BLB-points-review.pdf",sep=""))
 par(pty="s")
 plot(as.numeric(resi[,3]),1-as.numeric(resi[,4]),col="grey",xaxs="i",yaxs="i",pch=16,cex=0.6,ylim=c(-0.02,1.02),asp=1,xlim=c(-0.02,1.02),xlab="Clustering precision",ylab="Clustering density",main="Clustering of BLB variants")
 points(as.numeric(resi[low,3]),1-as.numeric(resi[low,4]),col="dodgerblue2",pch=16,cex=0.6)
@@ -1231,20 +1873,22 @@ dev.off()
 
 ##### plot for BLB regions AD vs AR
 
-load(file = paste(here,dataLoc,"regions.RData",sep=""))
+load(file = paste(here,dataLoc,"regions-review.RData",sep=""))
 
 dom<-read.table(file=paste(here,"00_scripts/databases-processing/gene-dom-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
 rec<-read.table(file=paste(here,"00_scripts/databases-processing/gene-rec-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
+som<-read.table(file=paste(here,"00_scripts/databases-processing/gene-som-pure.tsv",sep=""),header=FALSE,sep="\t")[,1]
 
 dom1=which(is.element(resi2[,2],dom))
 rec1=which(is.element(resi2[,2],rec))
+som1=which(is.element(resi2[,2],som))
 
 resi=resi2[dom1,]
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05 | is.na(resi[,7])),2])
 a1=unique(train[which(train[,70]>0 & is.element(train[,6],dom)),6])
 
 not=setdiff(unique(train[,6]),a1)
@@ -1254,26 +1898,26 @@ a3=setdiff(a3,c(a4,a5,not))
 a2=setdiff(a2,c(a3,a4,a5,not))
 a1=setdiff(a1,c(a2,a3,a4,a5,not))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-BLB-pie-AD.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-BLB-pie-AD-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >10 BLBs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
 tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
 perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
-pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="BLB clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
 dev.off()
 
 
 resi=resi2[rec1,]
 
-a5=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])>=0.66),2])
-a4=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
-a3=unique(resi[which(as.numeric(resi[,7])<0.05 & as.numeric(resi[,5])<0.33),2])
-a2=unique(resi[which(as.numeric(resi[,7])>=0.05),2])
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05 | is.na(resi[,7])),2])
 a1=unique(train[which(train[,70]>0 & is.element(train[,6],rec)),6])
 
 not=setdiff(unique(train[,6]),a1)
@@ -1283,19 +1927,46 @@ a3=setdiff(a3,c(a4,a5,not))
 a2=setdiff(a2,c(a3,a4,a5,not))
 a1=setdiff(a1,c(a2,a3,a4,a5,not))
 
-low=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])<0.33)
-med=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
-high=which(as.numeric(resi[,7])<(0.05) & as.numeric(resi[,5])>0.66)
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
 
-pdf(file = paste(here,plot,"clustering-BLB-pie-AR.pdf",sep=""))
+pdf(file = paste(here,plot,"clustering-BLB-pie-AR-review.pdf",sep=""))
 slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
 lbls <- c("No regions with >10 BLBs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
 a=paste("n = ",slices,sep="")
 tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
 perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
-pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="BLB clustering categories for most clustered isoform per gene", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
 dev.off()
 
+resi=resi2[som1,]
+
+a5=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])>=0.66),2])
+a4=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.66 & as.numeric(resi[,5])>=0.33),2])
+a3=unique(resi[which(as.numeric(resi[,8])<0.05 & as.numeric(resi[,5])<0.33),2])
+a2=unique(resi[which(as.numeric(resi[,8])>=0.05 | is.na(resi[,7])),2])
+a1=unique(train[which(train[,70]>0 & is.element(train[,6],som)),6])
+
+not=setdiff(unique(train[,6]),a1)
+
+a4=setdiff(a4,c(a5,not))
+a3=setdiff(a3,c(a4,a5,not))
+a2=setdiff(a2,c(a3,a4,a5,not))
+a1=setdiff(a1,c(a2,a3,a4,a5,not))
+
+low=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])<0.33)
+med=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.33 & as.numeric(resi[,5])<0.66)
+high=which(as.numeric(resi[,8])<(0.05) & as.numeric(resi[,5])>0.66)
+
+pdf(file = paste(here,plot,"clustering-BLB-pie-SOM-review.pdf",sep=""))
+slices <- c(length(a1),length(a2),length(a3),length(a4),length(a5))
+lbls <- c("No regions with >10 BLBs","> 1 region and \n not significant","Sparse clustering","Medium clustering","Dense clustering")
+a=paste("n = ",slices,sep="")
+tot=length(a1)+length(a2)+length(a3)+length(a4)+length(a5)
+perc <- paste(round(slices/tot*100,digits=1),"%",sep="")
+pie(slices, labels = paste(lbls,"\n",a," / ",perc,sep=""), main="", col=c("lightgrey","darkgrey","dodgerblue2","blue1","blue4"), border="white",init.angle=90,cex=1)
+dev.off()
 
 ######## Fig. S3 (startified by AF) ########
 
@@ -1360,12 +2031,29 @@ for (i in 1:length(limits)){
 muthigh=min(limits[which(lim1>0.95)])-0.001
 mutlow=max(limits[which(lim2>0.95)])+0.001
 
-pdf(file = paste(here,plot,"VUSCON-MutScore.pdf",sep=""),width=5,height=5)
+pdf(file = paste(here,plot,"VUSCON-MutScore.pdf",sep=""),width=4,height=5)
 par(mfrow=c(4,1),mar=c(2.1, 4.1, 2.1, 2.1))
-hist(pred[which(train[,1]=="PLP"),2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col='red')
-abline(v=muthigh,col=1)
-hist(pred[which(train[,1]=="BLB"),2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col='blue')
+hist(pred[which(train[,1]=="PLP"),2],n=50,main="",xlab="",cex.main=2,cex.lab=1.2,col='red',ylim=c(0,12500),yaxt="n")
+axis(2, at=c(0,3000,6000,9000,12000),labels=c(0,3000,6000,9000,12000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(pred[which(train[,1]=="PLP"),2]>muthigh))
+a2=length(which(pred[which(train[,1]=="PLP"),2]<mutlow))
+a3=length(which(pred[which(train[,1]=="PLP"),2]>=mutlow & pred[which(train[,1]=="PLP"),2]<=muthigh))
+text(mutlow/2,12000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,12000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,12000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+hist(pred[which(train[,1]=="BLB"),2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col='blue',ylim=c(0,4300),yaxt="n")
+axis(2, at=c(0,1000,2000,3000,4000),labels=c(0,1000,2000,3000,4000), las=2,cex.axis=1,pos=0)
+abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(pred[which(train[,1]=="BLB"),2]>muthigh))
+a2=length(which(pred[which(train[,1]=="BLB"),2]<mutlow))
+a3=length(which(pred[which(train[,1]=="BLB"),2]>=mutlow & pred[which(train[,1]=="BLB"),2]<=muthigh))
+text(mutlow/2,4150,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,4150,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,4150,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
 
 x=seq(0,1,1/50)
 x=x[2:length(x)]
@@ -1374,13 +2062,30 @@ col[1:50]='orange'
 col[which(x<mutlow)]='deepskyblue'
 col[which(x>muthigh)]='indianred2'
 
-hist(pred2[,2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col=col)
+hist(pred2[,2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col=col,ylim=c(0,16000),yaxt="n")
+axis(2, at=c(0,5000,10000,15000),labels=c(0,5000,10000,15000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
-hist(pred3[,2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col=col)
+a1=length(which(pred2[,2]>muthigh))
+a2=length(which(pred2[,2]<mutlow))
+a3=length(which(pred2[,2]>=mutlow & pred2[,2]<=muthigh))
+text(mutlow/2,15500,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,15500,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,15500,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+
+hist(pred3[,2],n=50,main="",xlab="MutScore",cex.main=2,cex.lab=1.2,col=col,ylim=c(0,2100),yaxt="n")
+axis(2, at=c(0,500,1000,1500,2000),labels=c(0,500,1000,1500,2000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
+a1=length(which(pred3[,2]>muthigh))
+a2=length(which(pred3[,2]<mutlow))
+a3=length(which(pred3[,2]>=mutlow & pred3[,2]<=muthigh))
+text(mutlow/2,2000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,2000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,2000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
 dev.off()
+
 
 pdf(file = paste(here,plot,"VUSCON-MutScore3.pdf",sep=""),width=10,height=5)
 a1=length(which(pred2[,2]>muthigh))
@@ -1417,12 +2122,31 @@ for (i in 1:length(limits)){
 muthigh=min(limits[which(lim1>0.95)])-0.001
 mutlow=max(limits[which(lim2>0.9498)])+0.001
 
-pdf(file = paste(here,plot,"VUSCON-VEST4.pdf",sep=""),width=5,height=5)
+pdf(file = paste(here,plot,"VUSCON-VEST4.pdf",sep=""),width=4,height=5)
 par(mfrow=c(4,1),mar=c(2.1, 4.1, 2.1, 2.1))
-hist(train[which(train[,1]=="PLP"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='red')
-abline(v=muthigh,col=1)
-hist(train[which(train[,1]=="BLB"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='blue')
+hist(train[which(train[,1]=="PLP"),n],n=50,main="",xlab="",cex.main=2,cex.lab=1.2,col='red',ylim=c(0,12500),yaxt="n")
+axis(2, at=c(0,3000,6000,9000,12000),labels=c(0,3000,6000,9000,12000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(train[which(train[,1]=="PLP"),n]>muthigh))
+a2=length(which(train[which(train[,1]=="PLP"),n]<mutlow))
+a3=length(which(train[which(train[,1]=="PLP"),n]>=mutlow & train[which(train[,1]=="PLP"),n]<=muthigh))
+text(mutlow/2,12000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,12000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,12000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+
+hist(train[which(train[,1]=="BLB"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='blue',ylim=c(0,4300),yaxt="n")
+axis(2, at=c(0,1000,2000,3000,4000),labels=c(0,1000,2000,3000,4000), las=2,cex.axis=1,pos=0)
+abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(train[which(train[,1]=="BLB"),n]>muthigh))
+a2=length(which(train[which(train[,1]=="BLB"),n]<mutlow))
+a3=length(which(train[which(train[,1]=="BLB"),n]>=mutlow & train[which(train[,1]=="BLB"),n]<=muthigh))
+text(mutlow/2,4150,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,4150,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,4150,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
 
 x=seq(0,1,1/50)
 x=x[2:length(x)]
@@ -1431,12 +2155,27 @@ col[1:50]='orange'
 col[which(x<mutlow)]='deepskyblue'
 col[which(x>muthigh)]='indianred2'
 
-hist(VUS[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col)
+hist(VUS[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col,ylim=c(0,16000),yaxt="n")
+axis(2, at=c(0,5000,10000,15000),labels=c(0,5000,10000,15000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
-hist(CON[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col)
+a1=length(which(VUS[,n]>muthigh))
+a2=length(which(VUS[,n]<mutlow))
+a3=length(which(VUS[,n]>=mutlow & VUS[,n]<=muthigh))
+text(mutlow/2,15500,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,15500,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,15500,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+hist(CON[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col,ylim=c(0,2100),yaxt="n")
+axis(2, at=c(0,500,1000,1500,2000),labels=c(0,500,1000,1500,2000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
+a1=length(which(CON[,n]>muthigh))
+a2=length(which(CON[,n]<mutlow))
+a3=length(which(CON[,n]>=mutlow & CON[,n]<=muthigh))
+text(mutlow/2,2000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,2000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,2000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
 dev.off()
 
 pdf(file = paste(here,plot,"VUSCON-VEST43.pdf",sep=""),width=10,height=5)
@@ -1474,12 +2213,29 @@ for (i in 1:length(limits)){
 muthigh=min(limits[which(lim1>0.95)])-0.001
 mutlow=max(limits[which(lim2>0.95)])+0.001
 
-pdf(file = paste(here,plot,"VUSCON-REVEL.pdf",sep=""),width=5,height=5)
+pdf(file = paste(here,plot,"VUSCON-REVEL.pdf",sep=""),width=4,height=5)
 par(mfrow=c(4,1),mar=c(2.1, 4.1, 2.1, 2.1))
-hist(train[which(train[,1]=="PLP"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='red')
-abline(v=muthigh,col=1)
-hist(train[which(train[,1]=="BLB"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='blue')
+hist(train[which(train[,1]=="PLP"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='red',ylim=c(0,12500),yaxt="n")
+axis(2, at=c(0,3000,6000,9000,12000),labels=c(0,3000,6000,9000,12000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(train[which(train[,1]=="PLP"),n]>muthigh))
+a2=length(which(train[which(train[,1]=="PLP"),n]<mutlow))
+a3=length(which(train[which(train[,1]=="PLP"),n]>=mutlow & train[which(train[,1]=="PLP"),n]<=muthigh))
+text(mutlow/2,12000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,12000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,12000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+hist(train[which(train[,1]=="BLB"),n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col='blue',ylim=c(0,4300),yaxt="n")
+axis(2, at=c(0,1000,2000,3000,4000),labels=c(0,1000,2000,3000,4000), las=2,cex.axis=1,pos=0)
+abline(v=mutlow,col=1)
+abline(v=muthigh,col=1)
+a1=length(which(train[which(train[,1]=="BLB"),n]>muthigh))
+a2=length(which(train[which(train[,1]=="BLB"),n]<mutlow))
+a3=length(which(train[which(train[,1]=="BLB"),n]>=mutlow & train[which(train[,1]=="BLB"),n]<=muthigh))
+text(mutlow/2,4150,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,4150,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,4150,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
 
 x=seq(0,1,1/50)
 x=x[2:length(x)]
@@ -1488,12 +2244,27 @@ col[1:50]='orange'
 col[which(x<mutlow)]='deepskyblue'
 col[which(x>muthigh)]='indianred2'
 
-hist(VUS[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col)
+hist(VUS[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col,ylim=c(0,16000),yaxt="n")
+axis(2, at=c(0,5000,10000,15000),labels=c(0,5000,10000,15000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
-hist(CON[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col)
+a1=length(which(VUS[,n]>muthigh))
+a2=length(which(VUS[,n]<mutlow))
+a3=length(which(VUS[,n]>=mutlow & VUS[,n]<=muthigh))
+text(mutlow/2,15500,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,15500,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,15500,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+
+hist(CON[,n],n=50,main="",xlab=predictor,cex.main=2,cex.lab=1.2,col=col,ylim=c(0,2100),yaxt="n")
+axis(2, at=c(0,500,1000,1500,2000),labels=c(0,500,1000,1500,2000), las=2,cex.axis=1,pos=0)
 abline(v=mutlow,col=1)
 abline(v=muthigh,col=1)
+a1=length(which(CON[,n]>muthigh))
+a2=length(which(CON[,n]<mutlow))
+a3=length(which(CON[,n]>=mutlow & CON[,n]<=muthigh))
+text(mutlow/2,2000,paste(round(a2/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((muthigh-mutlow)/2+mutlow,2000,paste(round(a3/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
+text((1-muthigh)/2+muthigh,2000,paste(round(a1/(a1+a2+a3)*100,digits=1),"%",sep=""),cex=0.9)
 dev.off()
 
 pdf(file = paste(here,plot,"VUSCON-REVEL3.pdf",sep=""),width=10,height=5)
@@ -1559,21 +2330,44 @@ hgmd=hgmd[which(hgmd[,1]>=2017),]
 
 list=hgmd[,8]
 
+
 list3=unique(c(train[,75],gnomad[,75]))
 a1=dbnfsp[which(is.element(dbnfsp[,75],list) & is.element(dbnfsp[,75],list3)==F),] # in HGMD and not in gnomad-BLB or train
+
+# remove same AA than training
+# temp=train[which(train[,1]=="PLP"),c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainPLP=apply(temp,1,paste,collapse="-",sep="")
+# temp=a1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAa1=apply(temp,1,paste,collapse="-",sep="")
+# a1=a1[which(is.element(sameAAa1,sameAAtrainPLP)==F),] # in HGMD and not in gnomad-BLB or train
+
 a1[,1]="PLP"
 a=duplicated(a1[,75])
 if(length(which(a))){a1=a1[-which(a==T),]}
 list2=unique(a1[,6])
 list3=unique(c(train[,75],VUSCON[,75],gnomad[,75],listbef))
+
 b1=realgno[which(realgno[,56]>(-3.75) & is.element(realgno[,75],list3)==F & is.element(realgno[,6],list2)==T),]
+
+# remove same AA than training
+# temp=rbind(train[which(train[,1]=="BLB"),c(2,63)],gnomad[,c(2,63)])
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainBLB=apply(temp,1,paste,collapse="-",sep="")
+# temp=b1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAb1=apply(temp,1,paste,collapse="-",sep="")
+# b1=b1[which(is.element(sameAAb1,sameAAtrainBLB)==F),] # in HGMD and not in gnomad-BLB or train
+
 b1[,1]="BLB"
 b=duplicated(b1[,75])
 if(length(which(b))){b1=b1[-which(b==T),]}
 
 a2=a1[,75]
 b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"HGMD-testing.RData",sep=""))
+
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"HGMD-testing-review.RData",sep=""))
 
 # DoCM
 
@@ -1584,68 +2378,306 @@ list=cos2[,1]
 list3=unique(c(train[,75],gnomad[,75]))
 
 a1=dbnfsp[which(is.element(dbnfsp[,75],list) & is.element(dbnfsp[,75],list3)==F),]
+
+# remove same AA than training
+# temp=train[which(train[,1]=="PLP"),c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainPLP=apply(temp,1,paste,collapse="-",sep="")
+# temp=a1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAa1=apply(temp,1,paste,collapse="-",sep="")
+# a1=a1[which(is.element(sameAAa1,sameAAtrainPLP)==F),] # in HGMD and not in gnomad-BLB or train
+
+
 a1[,1]="PLP"
 a=duplicated(a1[,75])
 if(length(which(a))){a1=a1[-which(a==T),]}
 list2=unique(a1[,6])
 list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
 b1=realgno[which(realgno[,56]>(-3.75) & is.element(realgno[,75],list3)==F & is.element(realgno[,6],list2) & is.element(realgno[,75],list)==F),]
+
+# remove same AA than training
+# temp=rbind(train[which(train[,1]=="BLB"),c(2,63)],gnomad[,c(2,63)])
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainBLB=apply(temp,1,paste,collapse="-",sep="")
+# temp=b1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAb1=apply(temp,1,paste,collapse="-",sep="")
+# b1=b1[which(is.element(sameAAb1,sameAAtrainBLB)==F),] # in HGMD and not in gnomad-BLB or train
+
 b1[,1]="BLB"
 b=duplicated(b1[,75])
 if(length(which(b))){b1=b1[-which(b==T),]}
 
 a2=a1[,75]
 b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"DoCM-testing.RData",sep=""))
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"DoCM-testing-review.RData",sep=""))
 
 # ClinVar
 
-cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-PLP.pos.tsv",sep=""),sep="\t",header=F)
+cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210919-PLP.pos.tsv",sep=""),sep="\t",header=F)
 list1=cos2[,1]
 
-cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
+cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210919-BLB.pos.tsv",sep=""),sep="\t",header=F)
 list2=cos2[,1]
 
 list3=unique(c(train[,75],gnomad[,75]))
 
 a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+# remove same AA than training
+# temp=train[which(train[,1]=="PLP"),c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainPLP=apply(temp,1,paste,collapse="-",sep="")
+# temp=a1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAa1=apply(temp,1,paste,collapse="-",sep="")
+# a1=a1[which(is.element(sameAAa1,sameAAtrainPLP)==F),] # in HGMD and not in gnomad-BLB or train
+
 a1[,1]="PLP"
 a=duplicated(a1[,75])
 if(length(which(a))){a1=a1[-which(a==T),]}
 listgene=unique(a1[,6])
 #list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
 b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+# remove same AA than training
+# temp=rbind(train[which(train[,1]=="BLB"),c(2,63)],gnomad[,c(2,63)])
+# temp[,2]=as.character(temp[,2])
+# sameAAtrainBLB=apply(temp,1,paste,collapse="-",sep="")
+# temp=b1[,c(2,63)]
+# temp[,2]=as.character(temp[,2])
+# sameAAb1=apply(temp,1,paste,collapse="-",sep="")
+# b1=b1[which(is.element(sameAAb1,sameAAtrainBLB)==F),] # in HGMD and not in gnomad-BLB or train
+
 b1[,1]="BLB"
 b=duplicated(b1[,75])
 if(length(which(b))){b1=b1[-which(b==T),]}
 
 a2=a1[,75]
 b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"ClinVar-testing.RData",sep=""))
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
+
+
+# MVP de novo
+
+################ de novo vs de novo
+
+cos2<-read.table(file=paste(here,"MVP/autism.tsv",sep=""),sep="\t",header=F)
+list1=cos2[,1]
+
+cos2<-read.table(file=paste(here,"MVP/control.tsv",sep=""),sep="\t",header=F)
+
+list2=cos2[,1]
+
+list3=unique(c(train[,75],gnomad[,75]))
+
+a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+a1[,1]="PLP"
+a=duplicated(a1[,75])
+if(length(which(a))){a1=a1[-which(a==T),]}
+listgene=unique(a1[,6])
+#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
+b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+b1[,1]="BLB"
+b=duplicated(b1[,75])
+if(length(which(b))){b1=b1[-which(b==T),]}
+
+a2=a1[,75]
+b2=b1[,75]
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DN.RData",sep=""))
+
+################ de novo2 vs de novo
+
+cos2<-read.table(file=paste(here,"MVP/autism2.tsv",sep=""),sep="\t",header=F)
+list1=cos2[,1]
+
+cos2<-read.table(file=paste(here,"MVP/control.tsv",sep=""),sep="\t",header=F)
+
+list2=cos2[,1]
+
+list3=unique(c(train[,75],gnomad[,75]))
+
+a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+a1[,1]="PLP"
+a=duplicated(a1[,75])
+if(length(which(a))){a1=a1[-which(a==T),]}
+listgene=unique(a1[,6])
+#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
+b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+b1[,1]="BLB"
+b=duplicated(b1[,75])
+if(length(which(b))){b1=b1[-which(b==T),]}
+
+a2=a1[,75]
+b2=b1[,75]
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DN2.RData",sep=""))
+
+
+##############
+################ de novo vs clinvar
+
+cos2<-read.table(file=paste(here,"MVP/autism.tsv",sep=""),sep="\t",header=F)
+list1=cos2[,1]
+
+cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
+
+list2=cos2[,1]
+
+list3=unique(c(train[,75],gnomad[,75]))
+
+a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+a1[,1]="PLP"
+a=duplicated(a1[,75])
+if(length(which(a))){a1=a1[-which(a==T),]}
+listgene=unique(a1[,6])
+#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
+b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+b1[,1]="BLB"
+b=duplicated(b1[,75])
+if(length(which(b))){b1=b1[-which(b==T),]}
+
+a2=a1[,75]
+b2=b1[,75]
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC.RData",sep=""))
+
+##############
+################ de novo2 vs clinvar
+
+cos2<-read.table(file=paste(here,"MVP/autism2.tsv",sep=""),sep="\t",header=F)
+list1=cos2[,1]
+
+cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
+
+list2=cos2[,1]
+
+list3=unique(c(train[,75],gnomad[,75]))
+
+a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+a1[,1]="PLP"
+a=duplicated(a1[,75])
+if(length(which(a))){a1=a1[-which(a==T),]}
+listgene=unique(a1[,6])
+#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
+b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+b1[,1]="BLB"
+b=duplicated(b1[,75])
+if(length(which(b))){b1=b1[-which(b==T),]}
+
+a2=a1[,75]
+b2=b1[,75]
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC2.RData",sep=""))
+##############
+################ de novo3 vs clinvar
+
+cos2<-read.table(file=paste(here,"MVP/autism3.tsv",sep=""),sep="\t",header=F)
+list1=cos2[,1]
+
+cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
+
+list2=cos2[,1]
+
+list3=unique(c(train[,75],gnomad[,75]))
+
+a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
+
+a1[,1]="PLP"
+a=duplicated(a1[,75])
+if(length(which(a))){a1=a1[-which(a==T),]}
+listgene=unique(a1[,6])
+#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
+b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
+
+b1[,1]="BLB"
+b=duplicated(b1[,75])
+if(length(which(b))){b1=b1[-which(b==T),]}
+
+a2=a1[,75]
+b2=b1[,75]
+save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC3.RData",sep=""))
+
+##############
+
+
+load(file=paste(here,dataLoc,"autism-testing-DN.RData",sep=""))
+data=rbind(a1,b1)
+colnames(data)[1]="ClinVar"
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+name="autism-testing-DN"
+title="Testing set 4: ASD de novo variants"
+plotROC2(data,name,title)
+
+load(file=paste(here,dataLoc,"autism-testing-DN2.RData",sep=""))
+data=rbind(a1,b1)
+colnames(data)[1]="ClinVar"
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+name="autism-testing-DN2"
+title="Testing set 4: ASD de novo variants"
+plotROC2(data,name,title)
+
+load(file=paste(here,dataLoc,"autism-testing-DC.RData",sep=""))
+data=rbind(a1,b1)
+colnames(data)[1]="ClinVar"
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+name="autism-testing-DC"
+title="Testing set 4: ASD de novo variants"
+plotROC2(data,name,title)
+
+load(file=paste(here,dataLoc,"autism-testing-DC2.RData",sep=""))
+data=rbind(a1,b1)
+colnames(data)[1]="ClinVar"
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+name="autism-testing-DC2"
+title="Testing set 4: ASD de novo variants"
+plotROC2(data,name,title)
+
+load(file=paste(here,dataLoc,"autism-testing-DC3.RData",sep=""))
+data=rbind(a1,b1)
+colnames(data)[1]="ClinVar"
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+name="autism-testing-DC3"
+title="Testing set 4: ASD de novo variants"
+plotROC2(data,name,title)
+
+#######
+
 
 # exclusion list between testing sets
 
-load(file=paste(here,dataLoc,"HGMD-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"HGMD-testing-review.RData",sep=""))
 HGMD=c(a2,b2)
 
-load(file=paste(here,dataLoc,"DoCM-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"DoCM-testing-review.RData",sep=""))
 DOCM=c(a2,b2)
 
-load(file=paste(here,dataLoc,"ClinVar-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
 clinvar=c(a2,b2)
 
 removeHGMD=unique(c(intersect(HGMD,DOCM),intersect(HGMD,clinvar)))
 removeclinvar=unique(intersect(clinvar,DOCM))
 
-save(removeclinvar,removeHGMD,file = paste(here,dataLoc,"remove.RData",sep=""))
+save(removeclinvar,removeHGMD,file = paste(here,dataLoc,"remove-review.RData",sep=""))
 
 
 ########## HGMD testing set ##############################
 
-load(file=paste(here,dataLoc,"HGMD-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"HGMD-testing-review.RData",sep=""))
 
 data=rbind(a1,b1)
-load(file = paste(here,dataLoc,"remove.RData",sep=""))
+load(file = paste(here,dataLoc,"remove-review.RData",sep=""))
 data=data[-which(is.element(data[,75],removeHGMD)),]
 
 write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-HGMD-PLP.tsv",quote=F,sep="\t",row.names=F)
@@ -1654,7 +2686,7 @@ write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"s
 colnames(data)[1]="ClinVar"
 table(data[,1])
 
-name="HGMD-testing-2017"
+name="HGMD-testing-2017-review"
 title="Testing set 2: HGMD disease"
 
 plotROC(data,name,title)
@@ -1832,7 +2864,7 @@ dev.off()
 
 ########## DoCM testing set ##############
 
-load(file=paste(here,dataLoc,"DoCM-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"DoCM-testing-review.RData",sep=""))
 
 data=rbind(a1,b1)
 colnames(data)[1]="ClinVar"
@@ -1840,7 +2872,7 @@ colnames(data)[1]="ClinVar"
 write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-DoCM-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
 write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-DoCM-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
 
-name="DoCM-testing"
+name="DoCM-testing-review"
 title="Testing set 3: DoCM somatic cancer"
 
 plotROC(data,name,title)
@@ -1852,19 +2884,19 @@ write.table(res1[,c(1,3)],file=paste(here,dataLoc,"AUC-testing3-docm.tsv",sep=""
 
 ########## ClinVar testing set ###########################################################################################################
 
-load(file=paste(here,dataLoc,"ClinVar-testing.RData",sep=""))
+load(file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
 
 data=rbind(a1,b1)
-load(file = paste(here,dataLoc,"remove.RData",sep=""))
+load(file = paste(here,dataLoc,"remove-review.RData",sep=""))
 if(length(removeclinvar)>0){
 	data=data[-which(is.element(data[,75],removeclinvar)),]
 }
 colnames(data)[1]="ClinVar"
 
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-clinvar-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-clinvar-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-clinvar-PLP-review.tsv",sep=""),quote=F,sep="\t",row.names=F)
+write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-clinvar-BLB-review.tsv",sep=""),quote=F,sep="\t",row.names=F)
 
-name="ClinVar-testing-april4"
+name="ClinVar-testing-review"
 title="Testing set 1: Recent ClinVar"
 
 plotROC(data,name,title)
@@ -1873,6 +2905,117 @@ table(data[,1])
 length(unique(data[,6]))
 write.table(res1[,c(1,3)],file=paste(here,dataLoc,"AUC-testing1-ClinVar.tsv",sep=""),quote=F,sep="\t")
   
+
+
+
+
+
+
+
+
+test<-read.table(file=paste(here,"data-20210919/","testing.tsv",sep=""),header=FALSE,sep="\t")  # OK
+
+load(file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
+
+data=rbind(a1,b1)
+load(file = paste(here,dataLoc,"remove-review.RData",sep=""))
+if(length(removeclinvar)>0){
+	data=data[-which(is.element(data[,75],removeclinvar)),]
+}
+colnames(data)[1]="ClinVar"
+
+dataALL=data
+
+### Training de novo
+
+l1=test[which(test[,1]=="PLP" & (test[,4]==32 | test[,4]==33)),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2) & is.element(dataALL[,6],unique(p1[,6]))),]
+data=rbind(p1,p2)
+
+name="ClinVar-testing-denovo-review"
+title="De novo PLP and all BLB ClinVar"
+
+plotROC(data,name,title)
+
+
+### Training germline
+
+l1=test[which(test[,1]=="PLP" & (test[,4]==1)),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2) & is.element(dataALL[,6],unique(p1[,6]))),]
+data=rbind(p1,p2)
+
+name="ClinVar-testing-germline-review"
+title="Germline PLP and all BLB ClinVar"
+
+plotROC(data,name,title)
+
+### 0 stars
+
+l1=test[which(test[,1]=="PLP" & (test[,3]=="no_assertion_criteria_provided")),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2)),]
+data=rbind(p1,p2)
+name="ClinVar-testing-0star-review"
+title="0 star PLP and all BLB ClinVar"
+plotROC(data,name,title)
+
+### 1 stars
+
+l1=test[which(test[,1]=="PLP" & (test[,3]=="criteria_provided,_single_submitter")),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2)),]
+data=rbind(p1,p2)
+name="ClinVar-testing-1star-review"
+title="1 star PLP and all BLB ClinVar"
+plotROC(data,name,title)
+
+### 2 stars
+
+l1=test[which(test[,1]=="PLP" & (test[,3]=="criteria_provided,_multiple_submitters,_no_conflicts")),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2)),]
+data=rbind(p1,p2)
+name="ClinVar-testing-2star-review"
+title="2 stars PLP and all BLB ClinVar"
+plotROC(data,name,title)
+
+### 3 stars
+
+l1=test[which(test[,1]=="PLP" & (test[,3]=="reviewed_by_expert_panel")),2]
+p1=dataALL[which(is.element(dataALL[,75],l1)),]
+l2=test[which(test[,1]=="BLB"),2]
+p2=dataALL[which(is.element(dataALL[,75],l2)),]
+data=rbind(p1,p2)
+name="ClinVar-testing-3star-review"
+title="3 stars PLP and all BLB ClinVar"
+plotROC(data,name,title)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### scores for all ###########
 
@@ -2004,5 +3147,213 @@ write.table(trainPLP,file=paste(here,dataLoc,"sets-training-PLP.tsv",sep=""),quo
 write.table(gnomadBLB,file=paste(here,dataLoc,"sets-gnomad-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
 write.table(VUSBLB,file=paste(here,dataLoc,"sets-VUS.tsv",sep=""),quote=F,sep="\t",row.names=F)
 write.table(CONBLB,file=paste(here,dataLoc,"sets-CON.tsv",sep=""),quote=F,sep="\t",row.names=F)
+
+
+#### colagen 
+
+load(file = paste(here,dataLoc,"data11.RData",sep=""))
+
+#COL3A1
+iso="NM_000090.3"
+l1=154
+l2=1221
+
+cola=data[which(data[,2]==iso),]
+cola=cola[,c(1,2,3,4,14,74)]
+
+cola[,2]=substring(cola[,5], 1, 1)
+cola[,3]=substring(cola[,4], 4, 100)
+cola[,3]=substring(cola[,3], 1, nchar(cola[,3])-1)
+
+cola[,3]=as.numeric(cola[,3])
+
+a=1:2000
+x1=a*3
+x2=a*3-1
+x3=a*3-2
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2)
+length(intersect(cola[Gin,3],x1))
+length(intersect(cola[Gin,3],x2))
+length(intersect(cola[Gin,3],x3))
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x1))
+Ginno=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x1)==F)
+Gout=which(cola[,2]=="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+Xin=which(cola[,2]!="G" & cola[,3]>=l1 & cola[,3]<=l2)
+Xout=which(cola[,2]!="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+dim(cola)
+length(Gin)+length(Ginno)+length(Gout)+length(Xin)+length(Xout)
+
+#boxplot(cola[Gin,6],cola[Ginno,6],cola[Gout,6],cola[Xin,6],cola[Xout,6])
+
+par(mfrow=c(5,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.025))
+hist(cola[Ginno,6],breaks=seq(0,1,0.025))
+hist(cola[Gout,6],breaks=seq(0,1,0.025))
+hist(cola[Xin,6],breaks=seq(0,1,0.025))
+hist(cola[Xout,6],breaks=seq(0,1,0.025))
+
+pdf(file=paste(here,plot,"COL3A1.pdf",sep=""))
+par(mfrow=c(3,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.01),main="COL3A1: Glycine changes in the triple helix domain (one each 3aa)",xlab="MutScore")
+hist(cola[Ginno,6],breaks=seq(0,1,0.01),main="COL3A1: Glycine changes in the triple helix domain (not one of each 3)",xlab="MutScore")
+hist(cola[Xin,6],breaks=seq(0,1,0.01),main="COL3A1: Other amino acid changes in the triple helix domain",xlab="MutScore")
+dev.off()
+
+### COL1A1
+
+iso="NM_000088.3"
+l1=162
+l2=1218
+
+cola=data[which(data[,2]==iso),]
+cola=cola[,c(1,2,3,4,14,74)]
+
+cola[,2]=substring(cola[,5], 1, 1)
+cola[,3]=substring(cola[,4], 4, 100)
+cola[,3]=substring(cola[,3], 1, nchar(cola[,3])-1)
+
+cola[,3]=as.numeric(cola[,3])
+
+a=1:2000
+x1=a*3
+x2=a*3-1
+x3=a*3-2
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2)
+length(intersect(cola[Gin,3],x1))
+length(intersect(cola[Gin,3],x2))
+length(intersect(cola[Gin,3],x3))
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x2))
+Ginno=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x2)==F)
+Gout=which(cola[,2]=="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+Xin=which(cola[,2]!="G" & cola[,3]>=l1 & cola[,3]<=l2)
+Xout=which(cola[,2]!="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+dim(cola)
+length(Gin)+length(Ginno)+length(Gout)+length(Xin)+length(Xout)
+
+#boxplot(cola[Gin,6],cola[Ginno,6],cola[Gout,6],cola[Xin,6],cola[Xout,6])
+
+par(mfrow=c(5,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.025))
+hist(cola[Ginno,6],breaks=seq(0,1,0.025))
+hist(cola[Gout,6],breaks=seq(0,1,0.025))
+hist(cola[Xin,6],breaks=seq(0,1,0.025))
+hist(cola[Xout,6],breaks=seq(0,1,0.025))
+
+pdf(file=paste(here,plot,"COL1A1.pdf",sep=""))
+par(mfrow=c(3,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.01),main="COL1A1: Glycine changes in the triple helix domain (one each 3aa)",xlab="MutScore")
+hist(cola[Ginno,6],breaks=seq(0,1,0.01),main="COL1A1: Glycine changes in the triple helix domain (in between triplets)",xlab="MutScore")
+hist(cola[Xin,6],breaks=seq(0,1,0.01),main="COL1A1: Other amino acid changes in the triple helix domain",xlab="MutScore")
+dev.off()
+
+### COL1A2
+
+iso="NM_000089.3"
+l1=80
+l2=1119
+
+cola=data[which(data[,2]==iso),]
+cola=cola[,c(1,2,3,4,14,74)]
+
+cola[,2]=substring(cola[,5], 1, 1)
+cola[,3]=substring(cola[,4], 4, 100)
+cola[,3]=substring(cola[,3], 1, nchar(cola[,3])-1)
+
+cola[,3]=as.numeric(cola[,3])
+
+a=1:2000
+x1=a*3
+x2=a*3-1
+x3=a*3-2
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2)
+length(intersect(cola[Gin,3],x1))
+length(intersect(cola[Gin,3],x2))
+length(intersect(cola[Gin,3],x3))
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x3))
+Ginno=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x3)==F)
+Gout=which(cola[,2]=="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+Xin=which(cola[,2]!="G" & cola[,3]>=l1 & cola[,3]<=l2)
+Xout=which(cola[,2]!="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+dim(cola)
+length(Gin)+length(Ginno)+length(Gout)+length(Xin)+length(Xout)
+
+#boxplot(cola[Gin,6],cola[Ginno,6],cola[Gout,6],cola[Xin,6],cola[Xout,6])
+
+par(mfrow=c(5,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.025))
+hist(cola[Ginno,6],breaks=seq(0,1,0.025))
+hist(cola[Gout,6],breaks=seq(0,1,0.025))
+hist(cola[Xin,6],breaks=seq(0,1,0.025))
+hist(cola[Xout,6],breaks=seq(0,1,0.025))
+
+pdf(file=paste(here,plot,"COL1A2.pdf",sep=""))
+par(mfrow=c(3,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.01),main="COL1A2: Glycine changes in the triple helix domain (one each 3aa)",xlab="MutScore")
+hist(cola[Ginno,6],breaks=seq(0,1,0.01),main="COL1A2: Glycine changes in the triple helix domain (in between triplets)",xlab="MutScore")
+hist(cola[Xin,6],breaks=seq(0,1,0.01),main="COL1A2: Other amino acid changes in the triple helix domain",xlab="MutScore")
+dev.off()
+
+### COL2A1
+
+iso="NM_001844.5"
+l1=80
+l2=1119
+
+cola=data[which(data[,2]==iso),]
+cola=cola[,c(1,2,3,4,14,74)]
+
+cola[,2]=substring(cola[,5], 1, 1)
+cola[,3]=substring(cola[,4], 4, 100)
+cola[,3]=substring(cola[,3], 1, nchar(cola[,3])-1)
+
+cola[,3]=as.numeric(cola[,3])
+
+a=1:2000
+x1=a*3
+x2=a*3-1
+x3=a*3-2
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2)
+length(intersect(cola[Gin,3],x1))
+length(intersect(cola[Gin,3],x2))
+length(intersect(cola[Gin,3],x3))
+
+Gin=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x1))
+Ginno=which(cola[,2]=="G" & cola[,3]>=l1 & cola[,3]<=l2 & is.element(cola[,3],x1)==F)
+Gout=which(cola[,2]=="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+Xin=which(cola[,2]!="G" & cola[,3]>=l1 & cola[,3]<=l2)
+Xout=which(cola[,2]!="G" & (cola[,3]<l1 | cola[,3]>l2))
+
+dim(cola)
+length(Gin)+length(Ginno)+length(Gout)+length(Xin)+length(Xout)
+
+#boxplot(cola[Gin,6],cola[Ginno,6],cola[Gout,6],cola[Xin,6],cola[Xout,6])
+
+par(mfrow=c(5,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.025))
+hist(cola[Ginno,6],breaks=seq(0,1,0.025))
+hist(cola[Gout,6],breaks=seq(0,1,0.025))
+hist(cola[Xin,6],breaks=seq(0,1,0.025))
+hist(cola[Xout,6],breaks=seq(0,1,0.025))
+
+pdf(file=paste(here,plot,"COL2A1.pdf",sep=""))
+par(mfrow=c(3,1))
+hist(cola[Gin,6],breaks=seq(0,1,0.01),main="COL2A1: Glycine changes in the triple helix domain (one each 3aa)",xlab="MutScore")
+hist(cola[Ginno,6],breaks=seq(0,1,0.01),main="COL2A1: Glycine changes in the triple helix domain (in between triplets)",xlab="MutScore")
+hist(cola[Xin,6],breaks=seq(0,1,0.01),main="COL2A1: Other amino acid changes in the triple helix domain",xlab="MutScore")
+dev.off()
 
 
