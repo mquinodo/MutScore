@@ -2459,202 +2459,6 @@ b2=b1[,75]
 save(a1,b1,a2,b2, file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
 
 
-# MVP de novo
-
-################ de novo vs de novo
-
-cos2<-read.table(file=paste(here,"MVP/autism.tsv",sep=""),sep="\t",header=F)
-list1=cos2[,1]
-
-cos2<-read.table(file=paste(here,"MVP/control.tsv",sep=""),sep="\t",header=F)
-
-list2=cos2[,1]
-
-list3=unique(c(train[,75],gnomad[,75]))
-
-a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
-
-a1[,1]="PLP"
-a=duplicated(a1[,75])
-if(length(which(a))){a1=a1[-which(a==T),]}
-listgene=unique(a1[,6])
-#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
-b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
-
-b1[,1]="BLB"
-b=duplicated(b1[,75])
-if(length(which(b))){b1=b1[-which(b==T),]}
-
-a2=a1[,75]
-b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DN.RData",sep=""))
-
-################ de novo2 vs de novo
-
-cos2<-read.table(file=paste(here,"MVP/autism2.tsv",sep=""),sep="\t",header=F)
-list1=cos2[,1]
-
-cos2<-read.table(file=paste(here,"MVP/control.tsv",sep=""),sep="\t",header=F)
-
-list2=cos2[,1]
-
-list3=unique(c(train[,75],gnomad[,75]))
-
-a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
-
-a1[,1]="PLP"
-a=duplicated(a1[,75])
-if(length(which(a))){a1=a1[-which(a==T),]}
-listgene=unique(a1[,6])
-#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
-b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
-
-b1[,1]="BLB"
-b=duplicated(b1[,75])
-if(length(which(b))){b1=b1[-which(b==T),]}
-
-a2=a1[,75]
-b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DN2.RData",sep=""))
-
-
-##############
-################ de novo vs clinvar
-
-cos2<-read.table(file=paste(here,"MVP/autism.tsv",sep=""),sep="\t",header=F)
-list1=cos2[,1]
-
-cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
-
-list2=cos2[,1]
-
-list3=unique(c(train[,75],gnomad[,75]))
-
-a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
-
-a1[,1]="PLP"
-a=duplicated(a1[,75])
-if(length(which(a))){a1=a1[-which(a==T),]}
-listgene=unique(a1[,6])
-#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
-b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
-
-b1[,1]="BLB"
-b=duplicated(b1[,75])
-if(length(which(b))){b1=b1[-which(b==T),]}
-
-a2=a1[,75]
-b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC.RData",sep=""))
-
-##############
-################ de novo2 vs clinvar
-
-cos2<-read.table(file=paste(here,"MVP/autism2.tsv",sep=""),sep="\t",header=F)
-list1=cos2[,1]
-
-cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
-
-list2=cos2[,1]
-
-list3=unique(c(train[,75],gnomad[,75]))
-
-a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
-
-a1[,1]="PLP"
-a=duplicated(a1[,75])
-if(length(which(a))){a1=a1[-which(a==T),]}
-listgene=unique(a1[,6])
-#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
-b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
-
-b1[,1]="BLB"
-b=duplicated(b1[,75])
-if(length(which(b))){b1=b1[-which(b==T),]}
-
-a2=a1[,75]
-b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC2.RData",sep=""))
-##############
-################ de novo3 vs clinvar
-
-cos2<-read.table(file=paste(here,"MVP/autism3.tsv",sep=""),sep="\t",header=F)
-list1=cos2[,1]
-
-cos2<-read.table(file=paste(here,"testing-set-1/clinvar-20210404-BLB.pos.tsv",sep=""),sep="\t",header=F)
-
-list2=cos2[,1]
-
-list3=unique(c(train[,75],gnomad[,75]))
-
-a1=dbnfsp[which(is.element(dbnfsp[,75],list1) & is.element(dbnfsp[,75],list3)==F),]
-
-a1[,1]="PLP"
-a=duplicated(a1[,75])
-if(length(which(a))){a1=a1[-which(a==T),]}
-listgene=unique(a1[,6])
-#list3=unique(c(train[,75],gnomad[,75],hgmd[,8],VUSCON[,75]))
-b1=dbnfsp[which(is.element(dbnfsp[,75],list2) & is.element(dbnfsp[,75],list3)==F & is.element(dbnfsp[,6],listgene)),]
-
-b1[,1]="BLB"
-b=duplicated(b1[,75])
-if(length(which(b))){b1=b1[-which(b==T),]}
-
-a2=a1[,75]
-b2=b1[,75]
-save(a1,b1,a2,b2, file=paste(here,dataLoc,"autism-testing-DC3.RData",sep=""))
-
-##############
-
-
-load(file=paste(here,dataLoc,"autism-testing-DN.RData",sep=""))
-data=rbind(a1,b1)
-colnames(data)[1]="ClinVar"
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
-name="autism-testing-DN"
-title="Testing set 4: ASD de novo variants"
-plotROC2(data,name,title)
-
-load(file=paste(here,dataLoc,"autism-testing-DN2.RData",sep=""))
-data=rbind(a1,b1)
-colnames(data)[1]="ClinVar"
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
-name="autism-testing-DN2"
-title="Testing set 4: ASD de novo variants"
-plotROC2(data,name,title)
-
-load(file=paste(here,dataLoc,"autism-testing-DC.RData",sep=""))
-data=rbind(a1,b1)
-colnames(data)[1]="ClinVar"
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
-name="autism-testing-DC"
-title="Testing set 4: ASD de novo variants"
-plotROC2(data,name,title)
-
-load(file=paste(here,dataLoc,"autism-testing-DC2.RData",sep=""))
-data=rbind(a1,b1)
-colnames(data)[1]="ClinVar"
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
-name="autism-testing-DC2"
-title="Testing set 4: ASD de novo variants"
-plotROC2(data,name,title)
-
-load(file=paste(here,dataLoc,"autism-testing-DC3.RData",sep=""))
-data=rbind(a1,b1)
-colnames(data)[1]="ClinVar"
-write.table(data[which(data[,1]=="PLP"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-PLP.tsv",sep=""),quote=F,sep="\t",row.names=F)
-write.table(data[which(data[,1]=="BLB"),c(8,9,11,12)],file=paste(here,dataLoc,"sets-ASD-BLB.tsv",sep=""),quote=F,sep="\t",row.names=F)
-name="autism-testing-DC3"
-title="Testing set 4: ASD de novo variants"
-plotROC2(data,name,title)
-
-#######
-
-
 # exclusion list between testing sets
 
 load(file=paste(here,dataLoc,"HGMD-testing-review.RData",sep=""))
@@ -2907,12 +2711,6 @@ write.table(res1[,c(1,3)],file=paste(here,dataLoc,"AUC-testing1-ClinVar.tsv",sep
   
 
 
-
-
-
-
-
-
 test<-read.table(file=paste(here,"data-20210919/","testing.tsv",sep=""),header=FALSE,sep="\t")  # OK
 
 load(file=paste(here,dataLoc,"ClinVar-testing-review.RData",sep=""))
@@ -2925,6 +2723,8 @@ if(length(removeclinvar)>0){
 colnames(data)[1]="ClinVar"
 
 dataALL=data
+
+write.table(unique(test[which(is.element(test[,2],data[,75])),]),file=paste(here,dataLoc,"testing1-details.tsv",sep=""),quote=F,sep="\t")
 
 ### Training de novo
 
